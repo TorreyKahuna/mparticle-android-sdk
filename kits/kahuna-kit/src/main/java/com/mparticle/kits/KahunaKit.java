@@ -75,7 +75,6 @@ public class KahunaKit extends AbstractKit implements ActivityLifecycleForwarder
                 Kahuna.getInstance().onAppCreate(context, properties.get(KEY_SECRET_KEY), null);
             }
             Kahuna.getInstance().setHybridSDKVersion(MPARTICLE_WRAPPER_KEY, BuildConfig.VERSION_NAME);
-            Kahuna.getInstance().start();
 
             initialized = true;
             if (!isServiceAvailable(context, KahunaPushService.class)) {
