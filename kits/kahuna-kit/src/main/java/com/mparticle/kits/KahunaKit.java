@@ -10,6 +10,7 @@ import android.text.TextUtils;
 import android.util.Log;
 
 import com.kahuna.sdk.EmptyCredentialsException;
+import com.kahuna.sdk.EventBuilder;
 import com.kahuna.sdk.Kahuna;
 import com.kahuna.sdk.KahunaPushReceiver;
 import com.kahuna.sdk.KahunaPushService;
@@ -156,25 +157,24 @@ public class KahunaKit extends AbstractKit implements ActivityLifecycleForwarder
         if (!TextUtils.isEmpty(event.getEventName())) {
             List<ReportingMessage> messages = new LinkedList<ReportingMessage>();
             Map<String, String> eventAttributes = event.getInfo();
+            String eventName = event.getEventName();
+            Integer count = null;
+            Integer value = null;
             if (sendTransactionData && eventAttributes != null && eventAttributes.containsKey(Constants.Commerce.RESERVED_KEY_LTV)) {
                 Double amount = Double.parseDouble(eventAttributes.get(Constants.Commerce.RESERVED_KEY_LTV)) * 100;
-                Kahuna.getInstance().trackEvent("purchase", 1, amount.intValue());
-                if (eventAttributes != null) {
-                    this.setUserAttributes(eventAttributes);
-                }
+                eventName = "purchase";
+                count = 1;
+                value = amount.intValue();
                 messages.add(ReportingMessage.fromEvent(this,
                         new MPEvent.Builder(event).eventName("purchase").build())
                 );
-                return messages;
             } else {
-                Kahuna.getInstance().trackEvent(event.getEventName());
-                if (eventAttributes != null) {
-                    Kahuna.getInstance().setUserAttributes(eventAttributes);
-                }
                 messages.add(ReportingMessage.fromEvent(this, event)
                 );
-                return messages;
             }
+
+            trackKahunaEvent(eventName, count, value, eventAttributes);
+            return messages;
         }
         return null;
     }
@@ -183,7 +183,7 @@ public class KahunaKit extends AbstractKit implements ActivityLifecycleForwarder
     public List<ReportingMessage> logLtvIncrease(BigDecimal valueIncreased, String eventName, Map<String, String> contextInfo) {
         if (sendTransactionData) {
             Double revenue = valueIncreased.doubleValue() * 100;
-            Kahuna.getInstance().trackEvent(eventName, 1, revenue.intValue());
+            trackKahunaEvent(eventName, 1, revenue.intValue(), null);
             List<ReportingMessage> messages = new LinkedList<ReportingMessage>();
             messages.add(
                     new ReportingMessage(this, ReportingMessage.MessageType.EVENT, System.currentTimeMillis(), contextInfo)
@@ -382,7 +382,10 @@ public class KahunaKit extends AbstractKit implements ActivityLifecycleForwarder
             eventName = getEventName(event);
         }
 
+        Map<String, String> eventAttributes = event.getCustomAttributes();
         int eventType = CommerceEventUtil.getEventType(event);
+        Integer count = null;
+        Integer value = null;
         if (eventType == Constants.Commerce.EVENT_TYPE_PURCHASE) {
             int quantity = 0;
             int revenue = 0;
@@ -399,17 +402,25 @@ public class KahunaKit extends AbstractKit implements ActivityLifecycleForwarder
                     revenue = (int) (transRevenue.doubleValue() * 100);
                 }
             }
-            Kahuna.getInstance().trackEvent(eventName, quantity, revenue);
-        } else {
-            Kahuna.getInstance().trackEvent(eventName);
+            count = quantity;
+            value = revenue;
         }
-
-        Map<String, String> eventAttributes = event.getCustomAttributes();
-        if (eventAttributes != null && eventAttributes.size() > 0) {
-            Kahuna.getInstance().setUserAttributes(eventAttributes);
-        }
+        trackKahunaEvent(eventName, count, value, event.getCustomAttributes());
         List<ReportingMessage> messages = new LinkedList<ReportingMessage>();
         messages.add(ReportingMessage.fromEvent(this, event).setEventName(eventName).setAttributes(eventAttributes));
         return messages;
+    }
+
+    private void trackKahunaEvent(String name, Integer count, Integer value, Map<String, String> eventAttributes) {
+        EventBuilder eb = new EventBuilder(name);
+        if(eventAttributes != null && eventAttributes.size() > 0) {
+            for(Map.Entry<String, String> entry : eventAttributes.entrySet()) {
+                eb.addProperty(entry.getKey(), entry.getValue());
+            }
+        }
+        if(count != null && value != null) {
+            eb.setPurchaseData(count.intValue(), value.intValue());
+        }
+        Kahuna.getInstance().track(eb.build());
     }
 }
