@@ -9,11 +9,14 @@ import android.location.Location;
 import android.text.TextUtils;
 import android.util.Log;
 
-import com.kahuna.sdk.KahunaAnalytics;
+import com.kahuna.sdk.EmptyCredentialsException;
+import com.kahuna.sdk.Kahuna;
 import com.kahuna.sdk.KahunaPushReceiver;
 import com.kahuna.sdk.KahunaPushService;
 import com.kahuna.sdk.KahunaUserAttributesKeys;
-import com.kahuna.sdk.KahunaUserCredentialKeys;
+import com.kahuna.sdk.IKahunaUserCredentials;
+import com.kahuna.sdk.KahunaUserCredentials;
+import com.mparticle.BuildConfig;
 import com.mparticle.Constants;
 import com.mparticle.MPEvent;
 import com.mparticle.MPReceiver;
@@ -43,6 +46,7 @@ public class KahunaKit extends AbstractKit implements ActivityLifecycleForwarder
     boolean initialized = false;
     private static final String KEY_TRANSACTION_DATA = "sendTransactionData";
     private static final String KEY_SECRET_KEY = "secretKey";
+    private static final String MPARTICLE_WRAPPER_KEY = "mparticle";
     private boolean sendTransactionData = false;
     private static final String KEY_EVENTNAME_ADD_TO_CART = "defaultAddToCartEventName";
     private static final String KEY_EVENTNAME_REMOVE_FROM_CART = "defaultRemoveFromCartEventName";
@@ -61,15 +65,16 @@ public class KahunaKit extends AbstractKit implements ActivityLifecycleForwarder
     @Override
     protected AbstractKit update() {
         if (!initialized) {
-            KahunaAnalytics.setDebugMode(MParticle.getInstance().getEnvironment() == MParticle.Environment.Development);
+            Kahuna.getInstance().setDebugMode(MParticle.getInstance().getEnvironment() == MParticle.Environment.Development);
             if (mEkManager.getConfigurationManager().isPushEnabled()) {
                 // registerForPush(context);
-                KahunaAnalytics.onAppCreate(context, properties.get(KEY_SECRET_KEY), mEkManager.getConfigurationManager().getPushSenderId());
-                KahunaAnalytics.disableKahunaGenerateNotifications();
+                Kahuna.getInstance().onAppCreate(context, properties.get(KEY_SECRET_KEY), mEkManager.getConfigurationManager().getPushSenderId());
+                Kahuna.getInstance().disableKahunaGenerateNotifications();
             } else {
-                KahunaAnalytics.onAppCreate(context, properties.get(KEY_SECRET_KEY), null);
+                Kahuna.getInstance().onAppCreate(context, properties.get(KEY_SECRET_KEY), null);
             }
-            KahunaAnalytics.start();
+            Kahuna.getInstance().setHybridSDKVersion(MPARTICLE_WRAPPER_KEY, BuildConfig.VERSION_NAME);
+            Kahuna.getInstance().start();
 
             initialized = true;
             if (!isServiceAvailable(context, KahunaPushService.class)) {
@@ -153,7 +158,7 @@ public class KahunaKit extends AbstractKit implements ActivityLifecycleForwarder
             Map<String, String> eventAttributes = event.getInfo();
             if (sendTransactionData && eventAttributes != null && eventAttributes.containsKey(Constants.Commerce.RESERVED_KEY_LTV)) {
                 Double amount = Double.parseDouble(eventAttributes.get(Constants.Commerce.RESERVED_KEY_LTV)) * 100;
-                KahunaAnalytics.trackEvent("purchase", 1, amount.intValue());
+                Kahuna.getInstance().trackEvent("purchase", 1, amount.intValue());
                 if (eventAttributes != null) {
                     this.setUserAttributes(eventAttributes);
                 }
@@ -162,9 +167,9 @@ public class KahunaKit extends AbstractKit implements ActivityLifecycleForwarder
                 );
                 return messages;
             } else {
-                KahunaAnalytics.trackEvent(event.getEventName());
+                Kahuna.getInstance().trackEvent(event.getEventName());
                 if (eventAttributes != null) {
-                    KahunaAnalytics.setUserAttributes(eventAttributes);
+                    Kahuna.getInstance().setUserAttributes(eventAttributes);
                 }
                 messages.add(ReportingMessage.fromEvent(this, event)
                 );
@@ -178,7 +183,7 @@ public class KahunaKit extends AbstractKit implements ActivityLifecycleForwarder
     public List<ReportingMessage> logLtvIncrease(BigDecimal valueIncreased, String eventName, Map<String, String> contextInfo) {
         if (sendTransactionData) {
             Double revenue = valueIncreased.doubleValue() * 100;
-            KahunaAnalytics.trackEvent(eventName, 1, revenue.intValue());
+            Kahuna.getInstance().trackEvent(eventName, 1, revenue.intValue());
             List<ReportingMessage> messages = new LinkedList<ReportingMessage>();
             messages.add(
                     new ReportingMessage(this, ReportingMessage.MessageType.EVENT, System.currentTimeMillis(), contextInfo)
@@ -213,7 +218,7 @@ public class KahunaKit extends AbstractKit implements ActivityLifecycleForwarder
             }
         }
         if (kahunaAttributes != null) {
-            KahunaAnalytics.setUserAttributes(kahunaAttributes);
+            Kahuna.getInstance().setUserAttributes(kahunaAttributes);
         }
     }
 
@@ -248,25 +253,43 @@ public class KahunaKit extends AbstractKit implements ActivityLifecycleForwarder
         String kahunaKey;
         switch (identityType) {
             case Facebook:
-                kahunaKey = KahunaUserCredentialKeys.FACEBOOK_KEY;
+                kahunaKey = KahunaUserCredentials.FACEBOOK_KEY;
                 break;
             case Email:
-                kahunaKey = KahunaUserCredentialKeys.EMAIL_KEY;
-                break;
-            case Other:
-                kahunaKey = "user_id";
+                kahunaKey = KahunaUserCredentials.EMAIL_KEY;
                 break;
             case CustomerId:
-                kahunaKey = KahunaUserCredentialKeys.USERNAME_KEY;
+                kahunaKey = KahunaUserCredentials.USERNAME_KEY;
                 break;
             case Twitter:
-                kahunaKey = KahunaUserCredentialKeys.TWITTER_KEY;
+                kahunaKey = KahunaUserCredentials.TWITTER_KEY;
+                break;
+            case Google:
+                kahunaKey = KahunaUserCredentials.GOOGLE_PLUS_ID;
+                break;
+            case FacebookCustomAudienceId:
+                kahunaKey = "fb_app_user_id";
+                break;
+            case Microsoft:
+                kahunaKey = "msft_id";
+                break;
+            case Yahoo:
+                kahunaKey = "yahoo_id";
+                break;
+            case Other:
+                kahunaKey = "mp_other_id";
                 break;
             default:
                 return;
 
         }
-        KahunaAnalytics.setUserCredential(kahunaKey, id);
+        IKahunaUserCredentials newCreds = Kahuna.getInstance().getUserCredentials();
+        newCreds.add(kahunaKey, id);
+        try {
+            Kahuna.getInstance().login(newCreds);
+        } catch (EmptyCredentialsException e) {
+            Log.e("mParticle SDK", "Kahuna is unable to login the user: " + e.getMessage());
+        }
     }
 
     @Override
@@ -308,7 +331,7 @@ public class KahunaKit extends AbstractKit implements ActivityLifecycleForwarder
 
     @Override
     List<ReportingMessage> logout() {
-        KahunaAnalytics.logout();
+        Kahuna.getInstance().logout();
         List<ReportingMessage> messageList = new LinkedList<ReportingMessage>();
         messageList.add(ReportingMessage.logoutMessage(this));
         return messageList;
@@ -333,7 +356,7 @@ public class KahunaKit extends AbstractKit implements ActivityLifecycleForwarder
     @Override
     public List<ReportingMessage> onActivityStopped(Activity activity, int activityCount) {
         update();
-        KahunaAnalytics.stop();
+        Kahuna.getInstance().stop();
         List<ReportingMessage> messageList = new LinkedList<ReportingMessage>();
         messageList.add(
                 new ReportingMessage(this, ReportingMessage.MessageType.APP_STATE_TRANSITION, System.currentTimeMillis(), null)
@@ -344,7 +367,7 @@ public class KahunaKit extends AbstractKit implements ActivityLifecycleForwarder
     @Override
     public List<ReportingMessage> onActivityStarted(Activity activity, int activityCount) {
         update();
-        KahunaAnalytics.start();
+        Kahuna.getInstance().start();
         List<ReportingMessage> messageList = new LinkedList<ReportingMessage>();
         messageList.add(
                 new ReportingMessage(this, ReportingMessage.MessageType.APP_STATE_TRANSITION, System.currentTimeMillis(), null)
@@ -376,14 +399,14 @@ public class KahunaKit extends AbstractKit implements ActivityLifecycleForwarder
                     revenue = (int) (transRevenue.doubleValue() * 100);
                 }
             }
-            KahunaAnalytics.trackEvent(eventName, quantity, revenue);
+            Kahuna.getInstance().trackEvent(eventName, quantity, revenue);
         } else {
-            KahunaAnalytics.trackEvent(eventName);
+            Kahuna.getInstance().trackEvent(eventName);
         }
 
         Map<String, String> eventAttributes = event.getCustomAttributes();
         if (eventAttributes != null && eventAttributes.size() > 0) {
-            KahunaAnalytics.setUserAttributes(eventAttributes);
+            Kahuna.getInstance().setUserAttributes(eventAttributes);
         }
         List<ReportingMessage> messages = new LinkedList<ReportingMessage>();
         messages.add(ReportingMessage.fromEvent(this, event).setEventName(eventName).setAttributes(eventAttributes));
